@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAN 오목</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #2b2a27; color: #e8e6e3;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+  }
+  .wrap { display: flex; gap: 24px; padding: 20px; flex-wrap: wrap; justify-content: center; }
+  #board {
+    display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr);
+    width: min(88vw, 82vh, 620px); aspect-ratio: 1;
+    background: #d3a95f; border: 8px solid #8a6a35; border-radius: 6px;
+    user-select: none; touch-action: manipulation;
+  }
+  .pt {
+    position: relative; cursor: pointer;
+    background:
+      linear-gradient(#5b4318, #5b4318) center / 100% 1px no-repeat,
+      linear-gradient(#5b4318, #5b4318) center / 1px 100% no-repeat;
+  }
+  .pt .star {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 18%; height: 18%; border-radius: 50%; background: #5b4318;
+  }
+  .stone {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 86%; height: 86%; border-radius: 50%; z-index: 1;
+    box-shadow: 1px 2px 3px rgba(0,0,0,.45);
+  }
+  .stone.b { background: radial-gradient(circle at 35% 30%, #5a5a5a, #0c0c0c 65%); }
+  .stone.w { background: radial-gradient(circle at 35% 30%, #ffffff, #c9c5bd 70%); }
+  .stone.last::after {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 26%; height: 26%; border-radius: 50%; background: #e04c4c;
+  }
+  .pt.hint:hover::after {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 60%; height: 60%; border-radius: 50%;
+    border: 2px dashed rgba(0,0,0,.45); z-index: 1;
+  }
+
+  .side { width: 280px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: #38352f; border-radius: 10px; padding: 14px 16px; }
+  #status { font-size: 18px; font-weight: 600; min-height: 26px; }
+  #substatus { font-size: 13px; opacity: .75; margin-top: 4px; min-height: 17px; }
+  .slot { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 4px 0; }
+  .slot .on { color: #7fd47f; } .slot .off { color: #888; }
+  #shareurl { font-family: Consolas, monospace; font-size: 13px; color: #ffd97a; word-break: break-all; }
+  button {
+    background: #6b5b3e; color: #fff; border: 0; border-radius: 8px;
+    padding: 10px 14px; font-size: 15px; cursor: pointer; font-family: inherit;
+  }
+  button:hover { background: #7d6a48; }
+  button:disabled { opacity: .4; cursor: default; }
+  button:disabled:hover { background: #6b5b3e; }
+  #undoPanel { border: 1px solid #8a7a55; }
+  #undoNo { background: #5c4444; } #undoNo:hover { background: #6e5252; }
+  #resignBtn { background: #6e3d3d; } #resignBtn:hover { background: #7f4848; }
+  #resignBtn:disabled:hover { background: #6e3d3d; }
+  #pick {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  #pick .box { background: #38352f; border-radius: 12px; padding: 24px 28px; text-align: center; }
+  #pick button { display: block; width: 220px; margin: 8px auto; font-size: 16px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="board"></div>
+  <div class="side">
+    <div class="card">
+      <div id="status">서버 연결 중…</div>
+      <div id="substatus"></div>
+    </div>
+    <div class="card" id="undoPanel" hidden>
+      <div id="undoMsg" style="margin-bottom:10px"></div>
+      <span id="undoActions">
+        <button id="undoYes">수락</button>
+        <button id="undoNo">거절</button>
+      </span>
+    </div>
+    <div class="card">
+      <div class="slot"><span>⚫ 흑 (선공):</span><span id="slot-b" class="off">대기 중</span></div>
+      <div class="slot"><span>⚪ 백:</span><span id="slot-w" class="off">대기 중</span></div>
+      <div class="slot"><span>👁 관전:</span><span id="slot-s">0</span></div>
+      <div id="wanrow" hidden>
+        <div style="margin-top:8px; font-size:13px; opacity:.8">🌐 외부 접속 (다른 인터넷)</div>
+        <div id="wanurl" style="font-family:Consolas,monospace; font-size:13px; color:#8fe08f; word-break:break-all"></div>
+      </div>
+      <div style="margin-top:8px; font-size:13px; opacity:.8">같은 와이파이 접속 주소</div>
+      <div id="shareurl">…</div>
+    </div>
+    <button id="undoBtn">무르기 요청</button>
+    <button id="resignBtn">항복 (기권)</button>
+    <button id="resetBtn">새 게임 (초기화)</button>
+  </div>
+</div>
+
+<div id="pick" hidden>
+  <div class="box">
+    <div style="font-size:17px; font-weight:600; margin-bottom:12px">진영을 선택하세요</div>
+    <button id="pickB">⚫ 흑 (선공)</button>
+    <button id="pickW">⚪ 백</button>
+    <button id="pickS">👁 관전</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const N = 15;
+const STARS = [[3,3],[3,11],[7,7],[11,3],[11,11]];
+const inB = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
+const nameOf = col => col === "b" ? "흑" : "백";
+
+/* ============ game state ============ */
+let board = Array.from({length: N}, () => new Array(N).fill(null));
+let moves = [];
+let gameOver = null;       // {kind:"win"|"draw", winner?}
+let lastMove = null;
+let myId = sessionStorage.getItem("omok-id");
+let myColor = "?";                       // "?" until a side is chosen
+const isPlayer = () => myColor === "b" || myColor === "w";
+let resetSeen = 0;
+let players = {b: false, w: false, spec: 0};
+let undoLeft = {b: 2, w: 2}, undoReq = null;
+let serverResult = null;
+const isOver = () => gameOver || serverResult;
+const turn = () => moves.length % 2 === 0 ? "b" : "w";
+
+function checkWin(r, c) {
+  const col = board[r][c];
+  for (const [dr, dc] of [[0,1],[1,0],[1,1],[1,-1]]) {
+    let n = 1;
+    for (const s of [1, -1]) {
+      let rr = r + dr * s, cc = c + dc * s;
+      while (inB(rr, cc) && board[rr][cc] === col) { n++; rr += dr * s; cc += dc * s; }
+    }
+    if (n >= 5) return true;
+  }
+  return false;
+}
+
+function applyAndRecord(m, silent) {
+  if (!inB(m.r, m.c) || board[m.r][m.c]) return; // desync guard
+  const col = turn();
+  board[m.r][m.c] = col;
+  moves.push(m);
+  lastMove = m;
+  if (checkWin(m.r, m.c)) gameOver = {kind: "win", winner: col};
+  else if (moves.length === N * N) gameOver = {kind: "draw"};
+  if (!silent) {
+    if (gameOver) playWin();
+    else playTick();
+  }
+}
+
+/* ============ sounds (Web Audio, no files) ============ */
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+document.addEventListener("pointerdown", ensureAudio);
+
+function beep(freq, delay, dur, vol, type) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime + delay;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type || "square"; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur);
+}
+const playTick = () => beep(520, 0, .05, .12, "sine");
+const playWin  = () => [440, 550, 660, 880].forEach((f, i) => beep(f, i * .18, .25, .28));
+
+/* ============ networking ============ */
+const $ = id => document.getElementById(id);
+const boardEl = $("board");
+
+// 터널(외부) 접속자는 자기 접속 주소를, 랜 접속자는 서버가 알려준 랜 주소를 공유용으로 본다
+const displayUrl = u =>
+  (location.hostname === "localhost" || location.hostname === "127.0.0.1" ||
+   /^(10\.|192\.168\.|172\.)/.test(location.hostname)) ? u : location.origin;
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+  return res.json();
+}
+
+function accept(d) {
+  myId = d.id;
+  sessionStorage.setItem("omok-id", myId);
+  myColor = d.color;
+  players = d.players;
+  resetSeen = d.reset;
+  $("shareurl").textContent = displayUrl(d.url);
+}
+async function join() {
+  const d = await api("/join", {id: myId});
+  if (d.color) { accept(d); return; }
+  players = d.players;
+  resetSeen = d.reset;
+  $("shareurl").textContent = displayUrl(d.url);
+  $("pick").hidden = false;
+}
+async function pickColor(want) {
+  try {
+    const d = await api("/join", {want});
+    accept(d);
+    $("pick").hidden = true;
+  } catch (e) { /* taken in a race; poll refreshes the buttons */ }
+  render();
+}
+
+async function poll() {
+  try {
+    const res = await fetch("/state?since=" + moves.length);
+    const d = await res.json();
+    players = d.players;
+    if (d.wan) { $("wanrow").hidden = false; $("wanurl").textContent = d.wan; }
+    else $("wanrow").hidden = true;
+    undoLeft = d.undo || undoLeft;
+    undoReq = d.undoReq;
+    if (d.result && !serverResult) { serverResult = d.result; playWin(); }
+    else if (!d.result) serverResult = null;
+    if (d.reset !== resetSeen) { resetSeen = d.reset; hardReset(); }
+    else if (d.total < moves.length) hardResync();
+    else for (const m of d.moves) applyAndRecord(m, d.moves.length > 1);
+    render();
+  } catch (e) {
+    $("status").textContent = "서버 연결 끊김 — 재시도 중…";
+  }
+  setTimeout(poll, 700);
+}
+
+async function hardResync() {
+  const d = await (await fetch("/state?since=0")).json();
+  hardReset();
+  resetSeen = d.reset;
+  for (const m of d.moves) applyAndRecord(m, true);
+}
+function hardReset() {
+  board = Array.from({length: N}, () => new Array(N).fill(null));
+  moves = []; gameOver = null; lastMove = null;
+}
+
+async function sendMove(m) {
+  applyAndRecord(m);
+  render();
+  try {
+    await api("/move", {id: myId, n: moves.length - 1, move: m});
+  } catch (e) {
+    await hardResync();   // server refused: roll back to server truth
+    render();
+  }
+}
+
+function onPointClick(r, c) {
+  if (isOver() || !isPlayer() || turn() !== myColor) return;
+  if (!(players.b && players.w)) return;
+  if (board[r][c]) return;
+  sendMove({r, c});
+}
+
+/* ============ UI ============ */
+function render() {
+  boardEl.innerHTML = "";
+  const myTurn = !isOver() && myColor !== "s" && turn() === myColor &&
+                 players.b && players.w;
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++) {
+      const pt = document.createElement("div");
+      pt.className = "pt";
+      if (myTurn && !board[r][c]) pt.classList.add("hint");
+      if (!board[r][c] && STARS.some(([sr, sc]) => sr === r && sc === c)) {
+        const s = document.createElement("span");
+        s.className = "star"; pt.appendChild(s);
+      }
+      if (board[r][c]) {
+        const st = document.createElement("span");
+        st.className = "stone " + board[r][c];
+        if (lastMove && lastMove.r === r && lastMove.c === c) st.classList.add("last");
+        pt.appendChild(st);
+      }
+      pt.onclick = () => onPointClick(r, c);
+      boardEl.appendChild(pt);
+    }
+
+  $("slot-b").textContent = players.b ? "접속됨" + (myColor === "b" ? " (나)" : "") : "대기 중";
+  $("slot-b").className = players.b ? "on" : "off";
+  $("slot-w").textContent = players.w ? "접속됨" + (myColor === "w" ? " (나)" : "") : "대기 중";
+  $("slot-w").className = players.w ? "on" : "off";
+  $("slot-s").textContent = players.spec;
+
+  const st = $("status"), sub = $("substatus");
+  const over = serverResult || gameOver;
+  if (over) {
+    st.textContent =
+      over.kind === "win"    ? nameOf(over.winner) + " 승리! 🏆 (오목 완성)" :
+      over.kind === "resign" ? nameOf(over.winner === "b" ? "w" : "b") + " 기권 — " +
+                               nameOf(over.winner) + " 승리 🏆"
+                             : "무승부 — 판이 가득 찼습니다";
+    sub.textContent = "'새 게임' 버튼으로 다시 시작할 수 있습니다";
+  } else if (!(players.b && players.w)) {
+    st.textContent = "상대 접속 대기 중…";
+    sub.textContent = "상대방이 왼쪽 주소로 접속하면 시작됩니다";
+  } else if (myColor === "s") {
+    st.textContent = nameOf(turn()) + " 차례 (관전 중)";
+    sub.textContent = moves.length + "수 진행";
+  } else if (turn() === myColor) {
+    st.textContent = "내 차례입니다 (" + nameOf(myColor) + ")";
+    sub.textContent = "교차점을 클릭해 돌을 놓으세요";
+  } else {
+    st.textContent = "상대 차례 (" + nameOf(turn()) + ")";
+    sub.textContent = moves.length + "수 진행";
+  }
+  if (!$("pick").hidden) {
+    $("pickB").disabled = players.b;
+    $("pickW").disabled = players.w;
+    $("pickB").textContent = "⚫ 흑 (선공)" + (players.b ? " — 사용 중" : "");
+    $("pickW").textContent = "⚪ 백" + (players.w ? " — 사용 중" : "");
+    st.textContent = "진영을 선택하세요";
+    sub.textContent = "";
+  }
+
+  const ub = $("undoBtn");
+  if (!isPlayer()) ub.hidden = true;
+  else {
+    ub.hidden = false;
+    const madeAMove = moves.length >= (myColor === "b" ? 1 : 2);
+    const left = undoLeft[myColor] != null ? undoLeft[myColor] : 2;
+    ub.textContent = "무르기 요청 (남은 " + left + "회)";
+    ub.disabled = !!undoReq || !madeAMove || left <= 0 ||
+                  !(players.b && players.w) || !!isOver();
+  }
+  const rb = $("resignBtn");
+  rb.hidden = !isPlayer();
+  rb.disabled = !!isOver() || !(players.b && players.w);
+
+  const panel = $("undoPanel");
+  if (undoReq && isPlayer()) {
+    panel.hidden = false;
+    if (undoReq === myColor) {
+      $("undoMsg").textContent = "무르기 요청 중 — 상대의 수락을 기다립니다…";
+      $("undoActions").hidden = true;
+    } else {
+      $("undoMsg").textContent = "상대(" + nameOf(undoReq) + ")가 무르기를 요청했습니다";
+      $("undoActions").hidden = false;
+    }
+  } else panel.hidden = true;
+}
+
+$("resignBtn").onclick = () => {
+  if (confirm("정말 항복하시겠습니까?")) api("/resign", {id: myId}).catch(() => {});
+};
+$("undoBtn").onclick = () => api("/undo", {id: myId}).catch(() => {});
+$("undoYes").onclick = () => api("/undo_reply", {id: myId, accept: true}).catch(() => {});
+$("undoNo").onclick = () => api("/undo_reply", {id: myId, accept: false}).catch(() => {});
+
+$("resetBtn").onclick = async () => {
+  if (!isPlayer()) return alert("플레이어만 초기화할 수 있습니다");
+  if (moves.length && !confirm("진행 중인 게임을 초기화할까요?")) return;
+  try { await api("/reset", {id: myId}); } catch (e) {}
+};
+$("pickB").onclick = () => pickColor("b");
+$("pickW").onclick = () => pickColor("w");
+$("pickS").onclick = () => pickColor("s");
+
+(async () => {
+  try { await join(); } catch (e) { $("status").textContent = "서버에 연결할 수 없습니다"; }
+  render();
+  poll();
+})();
+</script>
+</body>
+</html>
